@@ -1,0 +1,104 @@
+module DSP (A,B,D,C,CLK,CARRYIN,OPMODE,BCIN,RSTA,RSTB,RSTM,RSTP,RSTC,RSTD,RSTCARRYIN,RSTOPMODE,CEA,CEB,CEM,CEP,CEC,CED,CECARRYIN,CEOPMODE,PCIN,BCOUT,PCOUT,P,M,CARRYOUT,CARRYOUTF);
+
+	input [17:0] A,B,D,BCIN;
+	input [47:0] C,PCIN;
+	input [7:0] OPMODE;
+	input CLK,CARRYIN,RSTA,RSTB,RSTM,RSTP,RSTC,RSTD,RSTCARRYIN,RSTOPMODE,CEA,CEB,CEM,CEP,CEC,CED,CECARRYIN,CEOPMODE;
+
+	output [17:0] BCOUT;
+	output [47:0] PCOUT,P;
+	output [35:0] M;
+	output CARRYOUT,CARRYOUTF;
+
+	parameter A0REG = 0;
+	parameter A1REG = 1;
+	parameter B0REG = 0;
+	parameter B1REG = 1;
+	parameter CREG = 1;
+	parameter DREG = 1;
+	parameter MREG = 1;
+	parameter PREG = 1;
+	parameter CARRYINREG = 1;
+	parameter CARRYOUTREG = 1;
+	parameter OPMODEREG = 1;
+	parameter CARRYINSEL = "OPMODE5";
+	parameter B_INPUT = "DIRECT";
+	parameter RSTTYPE = "SYNC";
+
+	wire [17:0] D_MUX,B0_MUX,A0_MUX,PRE_OUT,MUX_POST,B1_MUX,A1_MUX;
+	wire [47:0] C_MUX,POST_OUT,D_CONCAT,P_MUX;
+	wire [7:0] OPMODE_MUX;
+	wire [35:0] MUL_OUT,M_MUX;
+	wire CYI,CYO,CARRY_IN_MUX,CARRYOUT_POST_ADDER;
+	reg [47:0] OUT_X,OUT_Z;
+
+	//1st Stage 
+
+	FF_Mux #(.W(18),.SEL(DREG),.RSTTYPE(RSTTYPE)) m1 (D,CLK,CED,RSTD,D_MUX);
+	FF_Mux #(.W(18),.SEL(A0REG),.RSTTYPE(RSTTYPE)) m2 (A,CLK,CEA,RSTA,A0_MUX);
+	FF_Mux #(.W(48),.SEL(CREG),.RSTTYPE(RSTTYPE)) m3 (C,CLK,RSTC,CEC,C_MUX);
+	FF_Mux #(.W(8),.SEL(OPMODEREG),.RSTTYPE(RSTTYPE)) m4 (OPMODE,CLK,CEOPMODE,RSTOPMODE,OPMODE_MUX);
+
+	Mux #(.B_INPUT(B_INPUT),.B0REG(B0REG),.RSTTYPE(RSTTYPE)) n1 (B,BCIN,CLK,CEB,RSTB,B0_MUX);
+
+	//2nd Stage
+
+	assign  PRE_OUT = (OPMODE_MUX[6])? D_MUX-B0_MUX : D_MUX+B0_MUX ;
+	assign  MUX_POST = (OPMODE_MUX[4])? PRE_OUT : B0_MUX;
+
+	FF_Mux #(.W(18),.SEL(B1REG),.RSTTYPE(RSTTYPE)) m6 (MUX_POST,CLK,CEB,RSTB,B1_MUX);
+	FF_Mux #(.W(18),.SEL(A1REG),.RSTTYPE(RSTTYPE)) m7 (A0_MUX,CLK,CEA,RSTA,A1_MUX);
+    
+    //4th Stage
+
+	assign MUL_OUT = B1_MUX * A1_MUX;
+	assign BCOUT = B1_MUX;
+
+	FF_Mux #(.W(36),.SEL(MREG),.RSTTYPE(RSTTYPE)) m8 (MUL_OUT,CLK,CEM,RSTM,M_MUX);
+
+	assign M = M_MUX;
+
+	mux2 #(.CARRYINSEL(CARRYINSEL)) n2 (CARRYIN,OPMODE_MUX[5],CYI);
+
+	FF_Mux #(.W(1),.SEL(CARRYINREG),.RSTTYPE(RSTTYPE)) m9 (CYI,CLK,CECARRYIN,RSTCARRYIN,CARRY_IN_MUX);
+
+	assign D_CONCAT ={D_MUX[11:0],A1_MUX,B1_MUX};
+
+	//5th Stage 
+
+	always @* begin
+    	case (OPMODE_MUX[1:0])
+        	2'b00: OUT_X = 48'd0;
+        	2'b01: OUT_X = {12'd0, M_MUX};
+        	2'b10: OUT_X = P_MUX;
+        	2'b11: OUT_X = D_CONCAT;
+    	endcase
+	end
+
+	always @* begin
+    	case (OPMODE_MUX[3:2])
+        	2'b00: OUT_Z = 48'd0;
+        	2'b01: OUT_Z = PCIN;
+       		2'b10: OUT_Z = P_MUX;
+        	2'b11: OUT_Z = C_MUX;
+	    endcase
+	end
+
+	assign {CARRYOUT_POST_ADDER,POST_OUT} = (OPMODE_MUX[7])? (OUT_Z-(OUT_X + CARRY_IN_MUX)) :  (OUT_Z + OUT_X + CARRY_IN_MUX);
+
+	FF_Mux #(.W(1),.SEL(CARRYOUTREG),.RSTTYPE(RSTTYPE)) m10 (CARRYOUT_POST_ADDER,CLK,CECARRYIN,RSTCARRYIN,CYO);
+
+	assign CARRYOUT = CYO;
+	assign CARRYOUTF = CYO;
+
+	//Final Stage
+
+	FF_Mux #(.W(48),.SEL(PREG),.RSTTYPE(RSTTYPE)) m11 (POST_OUT,CLK,CEP,RSTP,P_MUX);
+
+	assign P = P_MUX;
+	assign PCOUT = P_MUX;
+
+endmodule
+
+
+
